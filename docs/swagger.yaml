@@ -1,0 +1,67 @@
+basePath: /
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: The central API Gateway for the Adeff distributed audiobook platform.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Adeff API Gateway
+paths:
+  /api/v1/admin/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Initiates the Saga pattern. Uploads PDF to MinIO, creates DB record,
+        and triggers the Analyzer worker.
+      parameters:
+      - description: Title of the book
+        in: formData
+        name: title
+        required: true
+        type: string
+      - description: Language (e.g., HINDI, ENGLISH, MIXED)
+        in: formData
+        name: language
+        required: true
+        type: string
+      - description: The PDF file
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Upload a PDF to trigger audio generation
+      tags:
+      - Admin
+  /health:
+    get:
+      description: Returns the operational status of the API Gateway
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Check system health
+      tags:
+      - System
+swagger: "2.0"

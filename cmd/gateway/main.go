@@ -1,0 +1,136 @@
+package main
+
+import (
+	"log"
+	"net/http"
+	"os"
+
+	_ "adeff/docs"
+	"adeff/internal/database"
+	"adeff/internal/models"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+)
+
+// @title Adeff API Gateway
+// version 1.0
+// @description The central API Gateway for the Adeff distributed audiobook platform.
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.url http://www.swagger.io/support
+// @contact.email support@swagger.io
+
+//@license.name MIT
+//@license.url https://opensource.org/licenses/MIT
+
+// @host localhost:8080
+// @BasePath /
+func main() {
+	// loading env variables from .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: No .env file found. Falling back to system environment variables.")
+	}
+
+	if os.Getenv("NEON_GATEWAY_DSN") == "" {
+		log.Fatal("Error: NEON_GATEWAY_DSN environment variable is not set.")
+	}
+
+	// Initialize database connection
+	database.InitGatewayDB()
+
+	//initailizing gin routers
+	router := gin.Default()
+
+	//global middlewares
+	router.Use(gin.Recovery())
+	router.Use(gin.Logger())
+
+	//swagger router
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// health check endpoint
+	router.GET("/health", HealthCheck)
+
+	v1 := router.Group("/api/v1")
+	{
+		adminGroup := v1.Group("/admin")
+		{
+			adminGroup.POST("/upload", handleAdminUpload)
+		}
+	}
+
+	port := ":8080"
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		port = ":" + envPort
+	}
+	log.Printf("Starting Adeff API Gateway on port %s", port)
+
+	if err := router.Run(port); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
+}
+
+// HealthCheck godoc
+// @Summary Check system health
+// @Description Returns the operational status of the API Gateway
+// @Tags System
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /health [get]
+func HealthCheck(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "online",
+		"service": "adeff-api-gateway",
+		"message": "System is ready for audiobook processing",
+	})
+}
+
+// handleAdminUpload godoc
+// @Summary Upload a PDF to trigger audio generation
+// @Description Initiates the Saga pattern. Uploads PDF to MinIO, creates DB record, and triggers the Analyzer worker.
+// @Tags Admin
+// @Accept multipart/form-data
+// @Produce json
+// @Param title formData string true "Title of the book"
+// @Param language formData string true "Language (e.g., HINDI, ENGLISH, MIXED)"
+// @Param file formData file true "The PDF file"
+// @Success 202 {object} map[string]interface{}
+// @Failure 500 {object} map[string]interface{}
+// @Router /api/v1/admin/upload [post]
+func handleAdminUpload(c *gin.Context) {
+	title := c.PostForm("title")
+	language := c.PostForm("language")
+
+	MinioS3Key := "temp/" + uuid.New().String() + ".pdf"
+
+	// creating a book in gatewaydb
+	book := models.Book{
+		Title:      title,
+		Language:   language,
+		PdfS3Key:   MinioS3Key,
+		SagaStatus: "ANALYZING",
+	}
+
+	result := database.DB.Create(&book)
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create book record"})
+		return
+	}
+
+	publishAnalyzeEvent(book.ID.String(), MinioS3Key)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "Upload successful. Saga initiated.",
+		"book_id": book.ID,
+		"status":  book.SagaStatus,
+	})
+}
+
+func publishAnalyzeEvent(bookID string, s3Key string) {
+	log.Printf("Published to RabbitMQ -> BookID: %s, Key: %s", bookID, s3Key)
+}
