@@ -78,3 +78,17 @@ func (rc *RabbitClient) PublishAnalyzeEvent(event AnalyzeEvent) error {
 	)
 	return err
 }
+
+func (rc *RabbitClient) ConsumeAnalyzeQueue() (<-chan amqp.Delivery, error) {
+	// Tells RabbitMQ to send us messages from the queue we declared earlier
+	msgs, err := rc.Channel.Consume(
+		"queue.analyze", // queue
+		"",              // consumer
+		false,           // auto-ack (we'll ack manually after processing)
+		false,           // exclusive
+		false,           // no-local
+		false,           // no-wait
+		nil,             // args
+	)
+	return msgs, err
+}
