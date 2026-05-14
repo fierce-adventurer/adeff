@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -64,4 +65,29 @@ func UploadStream(ctx context.Context, objectName string, reader io.Reader, obje
 	}
 	log.Printf("[Storage] Upload successful -> Key: %s | ETag: %s", objectName, info.ETag)
 	return nil
+}
+
+func DownloadFile(ctx context.Context, objectName string) ([]byte, error) {
+	bucketName := os.Getenv("MINIO_BUCKET_NAME")
+	log.Printf("[Storage] Downloading object '%s'", objectName)
+
+	if bucketName == "" {
+		return nil, fmt.Errorf("MINIO_BUCKET_NAME environment variable is not set")
+	}
+
+	// get object from MinIO
+	object, err := MinioClient.GetObject(ctx, BucketName, objectName, minio.GetObjectOptions{})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get object %s from bucket %s: %w", objectName, bucketName, err)
+	}
+	defer object.Close()
+
+	// Read the stream into a byte slice
+	data, err := io.ReadAll(object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read data from MinIO object: %w", err)
+	}
+
+	return data, nil
 }
