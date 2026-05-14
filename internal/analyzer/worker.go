@@ -36,14 +36,14 @@ func (w *Worker) Start() error {
 		}
 	}()
 
-	select {} 
+	select {}
 }
 
 func (w *Worker) processMessage(d amqp.Delivery) {
 	var event mq.AnalyzeEvent
 	if err := json.Unmarshal(d.Body, &event); err != nil {
 		log.Printf("Failed to decode message: %v", err)
-		d.Nack(false, false) 
+		d.Nack(false, false)
 		return
 	}
 
@@ -72,6 +72,11 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 
 	log.Printf("Extracted %d characters. Ready for Groq.", len(text))
 
+	//print the first 100 characters to debug
+	if len(text) > 100 {
+		log.Printf("Preview: %s...", text[:100])
+	}
+
 	//Send text to Groq for TOC extraction
 
 	database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "ANALYZING_AI")
@@ -83,16 +88,19 @@ func extractText(data []byte) (string, error) {
 	content, err := pdf.NewReader(reader, int64(len(data)))
 
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create pdf reader: %w", err)
 	}
 
 	var buf bytes.Buffer
-	for i := 1 ; i <= 5 && i <= content.NumPage(); i++ {
+	for i := 1; i <= 5 && i <= content.NumPage(); i++ {
 		p := content.Page(i)
 		if p.V.IsNull() {
 			continue
 		}
-		t , _ := p.GetPlainText(nil)
+		t, err := p.GetPlainText(nil)
+		if err != nil {
+			return "", fmt.Errorf("failed to get text from page %d: %w", i, err)
+		}
 		buf.WriteString(t)
 	}
 
