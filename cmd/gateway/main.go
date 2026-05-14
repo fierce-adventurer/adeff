@@ -8,6 +8,7 @@ import (
 	_ "adeff/docs"
 	"adeff/internal/database"
 	"adeff/internal/models"
+	"adeff/pkg/storage"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -42,6 +43,8 @@ func main() {
 
 	// Initialize database connection
 	database.InitGatewayDB()
+	// Initialize MinIO client
+	storage.InitMinio()
 
 	//initailizing gin routers
 	router := gin.Default()
@@ -106,7 +109,29 @@ func handleAdminUpload(c *gin.Context) {
 	title := c.PostForm("title")
 	language := c.PostForm("language")
 
-	MinioS3Key := "temp/" + uuid.New().String() + ".pdf"
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		log.Printf("[Gateway] Missing file in upload payload: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "PDF File is required"})
+		return
+	}
+
+	fileStream, err := fileHeader.Open()
+	if err != nil {
+		log.Printf("[Gateway] Failed to open uploaded file: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process uploaded file"})
+		return
+	}
+	defer fileStream.Close()
+
+	MinioS3Key := "temp-uploads/" + uuid.New().String() + ".pdf"
+
+	err = storage.UploadStream(c.Request.Context(), MinioS3Key, fileStream, fileHeader.Size, "application/pdf")
+	if err != nil {
+		log.Printf("[Gateway] Failed to upload file to MinIO: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload file to CDN"})
+		return
+	}
 
 	// creating a book in gatewaydb
 	book := models.Book{
@@ -118,10 +143,12 @@ func handleAdminUpload(c *gin.Context) {
 
 	result := database.DB.Create(&book)
 	if result.Error != nil {
+		log.Printf("[Gateway] Database error: %v", result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create book record"})
 		return
 	}
 
+	// 5. Publish Event to CloudAMQP
 	publishAnalyzeEvent(book.ID.String(), MinioS3Key)
 
 	c.JSON(http.StatusAccepted, gin.H{
