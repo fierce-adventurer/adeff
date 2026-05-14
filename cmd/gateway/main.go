@@ -8,6 +8,7 @@ import (
 	_ "adeff/docs"
 	"adeff/internal/database"
 	"adeff/internal/models"
+	"adeff/pkg/mq"
 	"adeff/pkg/storage"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,11 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
+
+// Handler holds dependencies for API handlers
+type Handler struct {
+	Rabbit *mq.RabbitClient
+}
 
 // @title Adeff API Gateway
 // version 1.0
@@ -46,6 +52,24 @@ func main() {
 	// Initialize MinIO client
 	storage.InitMinio()
 
+	// Initialize CloudAMQP
+	rabbitURL := os.Getenv("RABBITMQ_URL")
+	if rabbitURL == "" {
+		log.Fatal("Error: RABBITMQ_URL environment variable is not set.")
+	}
+
+	rabbitClient, err := mq.ConnectRabbitMQ(rabbitURL)
+	if err != nil {
+		log.Fatal("Error connecting to RabbitMQ:", err)
+	}
+	defer rabbitClient.Conn.Close()
+	defer rabbitClient.Channel.Close()
+
+	//setup handler with dependencies
+	h := &Handler{
+		Rabbit: rabbitClient,
+	}
+
 	//initailizing gin routers
 	router := gin.Default()
 
@@ -63,7 +87,7 @@ func main() {
 	{
 		adminGroup := v1.Group("/admin")
 		{
-			adminGroup.POST("/upload", handleAdminUpload)
+			adminGroup.POST("/upload", h.handleAdminUpload)
 		}
 	}
 
@@ -105,7 +129,7 @@ func HealthCheck(c *gin.Context) {
 // @Success 202 {object} map[string]interface{}
 // @Failure 500 {object} map[string]interface{}
 // @Router /api/v1/admin/upload [post]
-func handleAdminUpload(c *gin.Context) {
+func (h *Handler) handleAdminUpload(c *gin.Context) {
 	title := c.PostForm("title")
 	language := c.PostForm("language")
 
@@ -124,6 +148,7 @@ func handleAdminUpload(c *gin.Context) {
 	}
 	defer fileStream.Close()
 
+	// upload to s3 minio
 	MinioS3Key := "temp-uploads/" + uuid.New().String() + ".pdf"
 
 	err = storage.UploadStream(c.Request.Context(), MinioS3Key, fileStream, fileHeader.Size, "application/pdf")
@@ -133,7 +158,7 @@ func handleAdminUpload(c *gin.Context) {
 		return
 	}
 
-	// creating a book in gatewaydb
+	// creating a book in gatewaydb and saving to neondb
 	book := models.Book{
 		Title:      title,
 		Language:   language,
@@ -149,7 +174,17 @@ func handleAdminUpload(c *gin.Context) {
 	}
 
 	// 5. Publish Event to CloudAMQP
-	publishAnalyzeEvent(book.ID.String(), MinioS3Key)
+	event := mq.AnalyzeEvent{
+		BookID:   book.ID.String(),
+		PdfS3Key: MinioS3Key,
+	}
+
+	err = h.Rabbit.PublishAnalyzeEvent(event)
+	if err != nil {
+		log.Printf("[Gateway] Failed to publish ClouudAMQP event: %v", err)
+	} else {
+		log.Printf("[Gateway] Published AnalyzeEvent to RabbitMQ for BookID: %s", book.ID.String())
+	}
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"message": "Upload successful. Saga initiated.",
