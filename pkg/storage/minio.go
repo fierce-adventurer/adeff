@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -74,6 +75,10 @@ func DownloadFile(ctx context.Context, objectName string) ([]byte, error) {
 	if bucketName == "" {
 		return nil, fmt.Errorf("S3_BUCKET_NAME environment variable is not set")
 	}
+
+	// Create a context that kills the download if it takes more than 30 seconds
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 
 	// get object from MinIO
 	object, err := MinioClient.GetObject(ctx, BucketName, objectName, minio.GetObjectOptions{})

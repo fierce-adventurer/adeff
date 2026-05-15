@@ -50,19 +50,26 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 	log.Printf("Processing BookID: %s", event.BookID)
 
 	//update status to "Extracting"
-	database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "EXTRACTING")
+	err := database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "EXTRACTING").Error
+
+	if err != nil {
+		log.Printf("DB Update Warning: %v", err)
+	}
+	log.Println("Step 1: Database status updated to EXTRACTING")
 
 	//download PDF from Minio
+	log.Printf("Step 2: Requesting download for %s...", event.PdfS3Key)
 	data, err := storage.DownloadFile(context.Background(), event.PdfS3Key)
 	if err != nil {
 		log.Printf("Failed to download PDF: %v", err)
 		database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "ERROR_DOWNLOAD")
-		d.Ack(false) // Acknowledge to remove from queue, since it's a bad message
+		d.Nack(false, true) // Acknowledge to remove from queue, since it's a bad message
 		return
 	}
+	log.Println("Step 2: Downloaded PDF into memory")
 
 	//extract text from PDF for TOC
-
+	log.Println("Step 3: Starting text extraction...")
 	text, err := extractText(data)
 	if err != nil {
 		log.Printf("Failed to extract text: %v", err)
@@ -70,6 +77,7 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 		d.Ack(false) // Acknowledge to remove from queue, since it's a bad message
 		return
 	}
+	log.Println("Step 3: Text extraction completed")
 
 	log.Printf("Extracted %d characters. Ready for Groq.", len(text))
 
@@ -79,8 +87,9 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 	}
 
 	//Send text to Groq for TOC extraction
-
+	//Db update
 	database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "ANALYZING_AI")
+	log.Println("Step 4: Status updated to ANALYZING_AI. Acknowledging message.")
 	d.Ack(false)
 }
 
