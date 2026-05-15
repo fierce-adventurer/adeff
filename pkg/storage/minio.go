@@ -68,11 +68,11 @@ func UploadStream(ctx context.Context, objectName string, reader io.Reader, obje
 }
 
 func DownloadFile(ctx context.Context, objectName string) ([]byte, error) {
-	bucketName := os.Getenv("MINIO_BUCKET_NAME")
+	bucketName := os.Getenv("S3_BUCKET_NAME")
 	log.Printf("[Storage] Downloading object '%s'", objectName)
 
 	if bucketName == "" {
-		return nil, fmt.Errorf("MINIO_BUCKET_NAME environment variable is not set")
+		return nil, fmt.Errorf("S3_BUCKET_NAME environment variable is not set")
 	}
 
 	// get object from MinIO

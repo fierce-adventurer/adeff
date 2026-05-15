@@ -43,7 +43,7 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 	var event mq.AnalyzeEvent
 	if err := json.Unmarshal(d.Body, &event); err != nil {
 		log.Printf("Failed to decode message: %v", err)
-		d.Nack(false, false)
+		d.Ack(false) // Acknowledge to remove from queue, since it's a bad message
 		return
 	}
 
@@ -56,7 +56,8 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 	data, err := storage.DownloadFile(context.Background(), event.PdfS3Key)
 	if err != nil {
 		log.Printf("Failed to download PDF: %v", err)
-		d.Nack(false, true) // Requeue if it's a transient network error
+		database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "ERROR_DOWNLOAD")
+		d.Ack(false) // Acknowledge to remove from queue, since it's a bad message
 		return
 	}
 
@@ -66,7 +67,7 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 	if err != nil {
 		log.Printf("Failed to extract text: %v", err)
 		database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "ERROR_EXTRACTION")
-		d.Ack(false)
+		d.Ack(false) // Acknowledge to remove from queue, since it's a bad message
 		return
 	}
 
