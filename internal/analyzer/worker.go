@@ -9,6 +9,7 @@ import (
 
 	"adeff/internal/database"
 	"adeff/internal/models"
+	"adeff/pkg/llm"
 	"adeff/pkg/mq"
 	"adeff/pkg/storage"
 
@@ -80,6 +81,18 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 	log.Println("Step 3: Text extraction completed")
 
 	log.Printf("Extracted %d characters. Ready for Groq.", len(text))
+
+	log.Println("Step 4: Sending text to Groq AI for analysis...")
+
+	analysisResult, err := llm.AnalyzeBookText(text)
+	if err != nil {
+		log.Printf("Failed to analyze with Groq: %v", err)
+		database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "ERROR_AI")
+		d.Ack(false)
+		return
+	}
+
+	log.Printf("Groq Analysis Result: %s", analysisResult)
 
 	//print the first 100 characters to debug
 	if len(text) > 100 {
