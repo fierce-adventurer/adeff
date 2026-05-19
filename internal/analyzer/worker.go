@@ -64,7 +64,7 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 	if err != nil {
 		log.Printf("Failed to download PDF: %v", err)
 		database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "ERROR_DOWNLOAD")
-		d.Nack(false, true) // Acknowledge to remove from queue, since it's a bad message
+		d.Ack(false) //Instant kill if failed to download, since we can't proceed without the PDF
 		return
 	}
 	log.Println("Step 2: Downloaded PDF into memory")
@@ -92,17 +92,35 @@ func (w *Worker) processMessage(d amqp.Delivery) {
 		return
 	}
 
-	log.Printf("Groq Analysis Result: %s", analysisResult)
+	log.Printf("Groq Detected Language: %s", analysisResult.Language)
+	log.Printf("Groq Analysis Result: %s", analysisResult.Summary)
 
 	//print the first 100 characters to debug
 	if len(text) > 100 {
 		log.Printf("Preview: %s...", text[:100])
 	}
 
-	//Send text to Groq for TOC extraction
-	//Db update
-	database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Update("saga_status", "ANALYZING_AI")
-	log.Println("Step 4: Status updated to ANALYZING_AI. Acknowledging message.")
+	/// Step 5: Update DB with AI's language (overwriting whatever the user uploaded!)
+	database.DB.Model(&models.Book{}).Where("id = ?", event.BookID).Updates(map[string]interface{}{
+		"saga_status": "ANALYZED",
+		"summary":     analysisResult.Summary,
+		"language":    analysisResult.Language, // The AI is the source of truth now
+	})
+	log.Println("Step 5: Summary and Detected Language saved.")
+
+	// Pass the baton to Phase 3
+	synthEvent := mq.SynthesizeEvent{
+		BookID:   event.BookID,
+		Text:     analysisResult.Summary,  // We are converting the summary to audio!
+		Language: analysisResult.Language, // Update this dynamically if you added Language to AnalyzeEvent
+	}
+
+	err = w.Rabbit.PublishSynthesizeEvent(synthEvent)
+	if err != nil {
+		log.Printf("Failed to trigger Synthesizer: %v", err)
+	} else {
+		log.Println("Sent to Synthesizer Queue")
+	}
 	d.Ack(false)
 }
 
