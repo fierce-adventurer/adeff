@@ -32,4 +32,6 @@ type Book struct {
 	CreateAt   time.Time
 	UpdateAt   time.Time
 	DeleteAt   gorm.DeletedAt `gorm:"index"`
+	Summary    string         `gorm:"type:text"`
+	AudioS3Key string
 }

@@ -20,6 +20,12 @@ type AnalyzeEvent struct {
 	PdfS3Key string `json:"pdf_s3_key"`
 }
 
+type SynthesizeEvent struct {
+	BookID   string `json:"book_id"`
+	Text     string `json:"text"` // The summary Groq generated
+	Language string `json:"language"`
+}
+
 func ConnectRabbitMQ(amqpURL string) (*RabbitClient, error) {
 	// The amqp091-go driver automatically handles the TLS handshake for amqps:// URLs
 	conn, err := amqp.Dial(amqpURL)
@@ -44,6 +50,15 @@ func ConnectRabbitMQ(amqpURL string) (*RabbitClient, error) {
 		nil,             // arguments
 	)
 
+	if err != nil {
+		return nil, err
+	}
+
+	// Declare the new Synthesizer queue
+	_, err = ch.QueueDeclare(
+		"queue.synthesize",
+		true, false, false, false, nil,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -91,4 +106,25 @@ func (rc *RabbitClient) ConsumeAnalyzeQueue() (<-chan amqp.Delivery, error) {
 		nil,             // args
 	)
 	return msgs, err
+}
+
+func (rc *RabbitClient) PublishSynthesizeEvent(event SynthesizeEvent) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	body, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	return rc.Channel.PublishWithContext(ctx, "", "queue.synthesize", false, false,
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			Body:         body,
+		})
+}
+
+func (rc *RabbitClient) ConsumeSynthesizeQueue() (<-chan amqp.Delivery, error) {
+	return rc.Channel.Consume("queue.synthesize", "", false, false, false, false, nil)
 }
