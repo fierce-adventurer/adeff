@@ -14,9 +14,7 @@ type SarvamRequest struct {
 	Inputs              []string `json:"inputs"`
 	TargetLanguageCode  string   `json:"target_language_code"`
 	Speaker             string   `json:"speaker"`
-	Pitch               float64  `json:"pitch"`
 	Pace                float64  `json:"pace"`
-	Loudness            float64  `json:"loudness"`
 	SpeechSampleRate    int      `json:"speech_sample_rate"`
 	EnablePreprocessing bool     `json:"enable_preprocessing"`
 	Model               string   `json:"model"`
@@ -41,13 +39,11 @@ func GenerateAudio(text string, language string) ([]byte, error) {
 	payload := SarvamRequest{
 		Inputs:              []string{text},
 		TargetLanguageCode:  targetCode,
-		Speaker:             "meera", // Sarvam's standard female voice
-		Pitch:               0,
-		Pace:                1.05, // Slightly faster for audiobook cadence
-		Loudness:            1.5,
-		SpeechSampleRate:    22050, // High quality audio
+		Speaker:             "ritu", // Sarvam's standard female voice
+		Pace:                1.05,   // Slightly faster for audiobook cadence
+		SpeechSampleRate:    22050,  // High quality audio
 		EnablePreprocessing: true,
-		Model:               "bulbul:v1",
+		Model:               "bulbul:v3",
 	}
 
 	jsonData, err := json.Marshal(payload)

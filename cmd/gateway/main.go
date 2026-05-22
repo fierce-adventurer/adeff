@@ -124,7 +124,6 @@ func HealthCheck(c *gin.Context) {
 // @Accept multipart/form-data
 // @Produce json
 // @Param title formData string true "Title of the book"
-// @Param language formData string true "Language (e.g., HINDI, ENGLISH, MIXED)"
 // @Param file formData file true "The PDF file"
 // @Success 202 {object} map[string]interface{}
 // @Failure 500 {object} map[string]interface{}
